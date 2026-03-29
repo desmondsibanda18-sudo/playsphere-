@@ -14,773 +14,929 @@
            GoogleAuthProvider, signInWithPopup, RecaptchaVerifier,
            signInWithPhoneNumber, onAuthStateChanged, signOut }
     from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-  import { getFirestore, doc, setDoc, getDoc, updateDoc, increment, collection, addDoc, serverTimestamp }
+  import { getFirestore, doc, setDoc, getDoc, updateDoc, increment,
+           serverTimestamp, collection, addDoc }
     from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-  // ── YOUR FIREBASE CONFIG ──────────────────────────────────
+  // ── FIREBASE CONFIG ───────────────────────────────────────
   const firebaseConfig = {
     apiKey: "AIzaSyDEb4D0kO-tbeOmoLy7rw9h7VO1P63wRIo",
     authDomain: "playsphere-35319.firebaseapp.com",
     projectId: "playsphere-35319",
     storageBucket: "playsphere-35319.firebasestorage.app",
     messagingSenderId: "862721704612",
-    appId: "1:862721704612:web:84bd419c515a3645c21c31",
-    measurementId: "G-6CG6PPF58V"
+    appId: "1:862721704612:web:84bd419c515a3645c21c31"
   };
+
+  // ── PAYNOW CONFIG ─────────────────────────────────────────
+  const PAYNOW_INTEGRATION_ID = "23978";
+  const COIN_VALUE = 0.002; // $0.002 per coin
+  const MIN_WITHDRAWAL_COINS = 100;
 
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
   const googleProvider = new GoogleAuthProvider();
 
-  // ── HELPER: Create or get user in Firestore ───────────────
-  async function ensureUserDoc(user, extraData = {}) {
+  // ── CREATE/GET USER ───────────────────────────────────────
+  async function ensureUser(user, extra = {}) {
     const ref = doc(db, "users", user.uid);
     const snap = await getDoc(ref);
     if (!snap.exists()) {
       await setDoc(ref, {
         uid: user.uid,
-        name: user.displayName || extraData.name || "Player",
+        name: user.displayName || extra.name || "Player",
         email: user.email || "",
-        phone: user.phoneNumber || extraData.phone || "",
-        country: extraData.country || "Zimbabwe",
-        coins: 50,
-        games: 0,
-        wins: 0,
+        phone: user.phoneNumber || extra.phone || "",
+        country: extra.country || "Zimbabwe",
+        coins: 50, games: 0, wins: 0,
         referralCode: "PS-" + Math.random().toString(36).substr(2,7).toUpperCase(),
-        referrals: 0,
+        referrals: 0, totalEarned: 0,
         createdAt: serverTimestamp(),
-        authMethod: extraData.authMethod || "email"
+        authMethod: extra.authMethod || "email"
       });
     }
     return (await getDoc(ref)).data();
   }
 
-  // ── EMAIL SIGN UP ─────────────────────────────────────────
+  // ── EMAIL SIGNUP ──────────────────────────────────────────
   window.signUpEmail = async function() {
-    const name    = document.getElementById("su-name").value.trim();
-    const email   = document.getElementById("su-email").value.trim();
-    const pass    = document.getElementById("su-pass").value.trim();
-    const country = document.getElementById("su-country").value;
-    if (!name||!email||!pass) { showMsg("su-msg","Please fill all fields.","red"); return; }
-    if (pass.length < 6)      { showMsg("su-msg","Password must be at least 6 characters.","red"); return; }
-    setLoading("su-btn", true);
+    const name    = v("su-name");
+    const email   = v("su-email");
+    const pass    = v("su-pass");
+    const country = v("su-country");
+    if (!name||!email||!pass) { msg("su-msg","Fill all fields.","red"); return; }
+    if (pass.length<6) { msg("su-msg","Password min 6 characters.","red"); return; }
+    btn("su-btn",true);
     try {
-      const cred = await createUserWithEmailAndPassword(auth, email, pass);
-      const userData = await ensureUserDoc(cred.user, {name, country, authMethod:"email"});
-      showApp(userData);
-    } catch(e) {
-      showMsg("su-msg", friendlyError(e.code), "red");
-    }
-    setLoading("su-btn", false);
+      const c = await createUserWithEmailAndPassword(auth,email,pass);
+      const u = await ensureUser(c.user,{name,country,authMethod:"email"});
+      showApp(u);
+    } catch(e){ msg("su-msg",err(e.code),"red"); }
+    btn("su-btn",false);
   };
 
-  // ── EMAIL LOG IN ──────────────────────────────────────────
+  // ── EMAIL LOGIN ───────────────────────────────────────────
   window.logInEmail = async function() {
-    const email = document.getElementById("li-email").value.trim();
-    const pass  = document.getElementById("li-pass").value.trim();
-    if (!email||!pass) { showMsg("li-msg","Please fill all fields.","red"); return; }
-    setLoading("li-btn", true);
+    const email = v("li-email");
+    const pass  = v("li-pass");
+    if (!email||!pass) { msg("li-msg","Fill all fields.","red"); return; }
+    btn("li-btn",true);
     try {
-      const cred = await signInWithEmailAndPassword(auth, email, pass);
-      const userData = await ensureUserDoc(cred.user);
-      showApp(userData);
-    } catch(e) {
-      showMsg("li-msg", friendlyError(e.code), "red");
-    }
-    setLoading("li-btn", false);
+      const c = await signInWithEmailAndPassword(auth,email,pass);
+      const u = await ensureUser(c.user);
+      showApp(u);
+    } catch(e){ msg("li-msg",err(e.code),"red"); }
+    btn("li-btn",false);
   };
 
-  // ── GOOGLE SIGN IN ────────────────────────────────────────
+  // ── GOOGLE LOGIN ──────────────────────────────────────────
   window.signInGoogle = async function() {
     try {
-      const result = await signInWithPopup(auth, googleProvider);
+      const r = await signInWithPopup(auth,googleProvider);
       const country = document.getElementById("g-country")?.value || "Zimbabwe";
-      const userData = await ensureUserDoc(result.user, {country, authMethod:"google"});
-      showApp(userData);
-    } catch(e) {
-      showMsg("g-msg", friendlyError(e.code), "red");
-    }
+      const u = await ensureUser(r.user,{country,authMethod:"google"});
+      showApp(u);
+    } catch(e){ msg("g-msg",err(e.code),"red"); }
   };
 
-  // ── PHONE OTP — SEND ──────────────────────────────────────
+  // ── PHONE OTP SEND ────────────────────────────────────────
   window.sendOTP = async function() {
-    const phone   = document.getElementById("ph-number").value.trim();
-    const country = document.getElementById("ph-country").value;
-    if (!phone) { showMsg("ph-msg","Enter your phone number.","red"); return; }
-    setLoading("ph-btn", true);
+    const phone = v("ph-number");
+    if (!phone) { msg("ph-msg","Enter phone number.","red"); return; }
+    btn("ph-btn",true);
     try {
-      if (!window.recaptchaVerifier) {
-        window.recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {size:"invisible"});
+      if (!window.recapV) {
+        window.recapV = new RecaptchaVerifier(auth,"recaptcha-box",{size:"invisible"});
       }
-      const formatted = phone.startsWith("+") ? phone : "+263" + phone.replace(/^0/,"");
-      window.confirmationResult = await signInWithPhoneNumber(auth, formatted, window.recaptchaVerifier);
-      document.getElementById("ph-step1").style.display = "none";
-      document.getElementById("ph-step2").style.display = "block";
-      showMsg("ph-msg2","OTP sent to "+formatted,"green");
-    } catch(e) {
-      showMsg("ph-msg", friendlyError(e.code), "red");
-      if(window.recaptchaVerifier) { window.recaptchaVerifier.clear(); window.recaptchaVerifier = null; }
+      const fmt = phone.startsWith("+") ? phone : "+263"+phone.replace(/^0/,"");
+      window.confResult = await signInWithPhoneNumber(auth,fmt,window.recapV);
+      document.getElementById("ph-step1").style.display="none";
+      document.getElementById("ph-step2").style.display="block";
+      msg("ph-msg2","OTP sent to "+fmt,"green");
+    } catch(e){
+      msg("ph-msg",err(e.code),"red");
+      if(window.recapV){window.recapV.clear();window.recapV=null;}
     }
-    setLoading("ph-btn", false);
+    btn("ph-btn",false);
   };
 
-  // ── PHONE OTP — VERIFY ────────────────────────────────────
+  // ── PHONE OTP VERIFY ──────────────────────────────────────
   window.verifyOTP = async function() {
-    const otp     = document.getElementById("ph-otp").value.trim();
-    const name    = document.getElementById("ph-name").value.trim() || "Player";
-    const country = document.getElementById("ph-country").value;
-    if (!otp) { showMsg("ph-msg2","Enter the OTP code.","red"); return; }
-    setLoading("ph-verify-btn", true);
+    const otp     = v("ph-otp");
+    const name    = v("ph-name")||"Player";
+    const country = document.getElementById("ph-country")?.value||"Zimbabwe";
+    if (!otp) { msg("ph-msg2","Enter OTP.","red"); return; }
+    btn("ph-vbtn",true);
     try {
-      const result = await window.confirmationResult.confirm(otp);
-      const userData = await ensureUserDoc(result.user, {name, country, authMethod:"phone"});
-      showApp(userData);
-    } catch(e) {
-      showMsg("ph-msg2", friendlyError(e.code), "red");
-    }
-    setLoading("ph-verify-btn", false);
+      const r = await window.confResult.confirm(otp);
+      const u = await ensureUser(r.user,{name,country,authMethod:"phone"});
+      showApp(u);
+    } catch(e){ msg("ph-msg2",err(e.code),"red"); }
+    btn("ph-vbtn",false);
   };
 
   // ── SIGN OUT ──────────────────────────────────────────────
   window.doSignOut = async function() {
     await signOut(auth);
-    document.getElementById("app-screen").style.display = "none";
-    document.getElementById("auth-section").style.display = "block";
-    document.getElementById("hero-section").style.display = "block";
+    document.getElementById("app-screen").style.display="none";
+    document.getElementById("main-content").style.display="block";
+    window.scrollTo(0,0);
   };
 
-  // ── AUTH STATE LISTENER ───────────────────────────────────
-  onAuthStateChanged(auth, async (user) => {
+  // ── AUTO LOGIN ────────────────────────────────────────────
+  onAuthStateChanged(auth, async user => {
     if (user) {
-      const userData = await ensureUserDoc(user);
-      showApp(userData);
+      const u = await ensureUser(user);
+      showApp(u);
     }
   });
 
-  // ── SHOW APP AFTER LOGIN ──────────────────────────────────
-  function showApp(userData) {
-    document.getElementById("auth-section").style.display = "none";
-    document.getElementById("hero-section").style.display = "none";
-    document.getElementById("app-screen").style.display = "block";
-    document.getElementById("app-name").textContent = userData.name || "Player";
-    document.getElementById("app-coins").textContent = (userData.coins||50).toLocaleString();
-    document.getElementById("app-country").textContent = userData.country || "Zimbabwe";
-    document.getElementById("app-code").textContent = userData.referralCode || "PS-LOADING";
-    document.getElementById("app-games").textContent = userData.games || 0;
-    document.getElementById("app-usd").textContent = "$" + ((userData.coins||50)*0.002).toFixed(2);
-    window.currentUserData = userData;
+  // ── SHOW APP ──────────────────────────────────────────────
+  function showApp(u) {
+    document.getElementById("main-content").style.display="none";
+    document.getElementById("app-screen").style.display="block";
+    window.currentUser = u;
+    set("app-name", u.name||"Player");
+    set("app-coins", fmt(u.coins||50));
+    set("app-country", u.country||"Zimbabwe");
+    set("app-code", u.referralCode||"PS-LOADING");
+    set("app-games", u.games||0);
+    set("app-usd","$"+((u.coins||50)*COIN_VALUE).toFixed(2));
+    set("wallet-coins", fmt(u.coins||50));
+    set("wallet-usd",((u.coins||50)*COIN_VALUE).toFixed(2));
     window.scrollTo(0,0);
   }
 
+  // ── PAYNOW WITHDRAWAL ─────────────────────────────────────
+  window.initiateWithdrawal = async function() {
+    const u = window.currentUser;
+    if (!u) return;
+    const coinsInput = parseInt(document.getElementById("withdraw-coins").value);
+    const phone      = document.getElementById("withdraw-phone").value.trim();
+    const wMsg       = document.getElementById("withdraw-msg");
+
+    if (!coinsInput || coinsInput < MIN_WITHDRAWAL_COINS) {
+      wMsg.textContent = "Minimum withdrawal is "+MIN_WITHDRAWAL_COINS+" coins ($"+
+        (MIN_WITHDRAWAL_COINS*COIN_VALUE).toFixed(2)+")";
+      wMsg.style.color="#f43f5e"; wMsg.style.display="block"; return;
+    }
+    if (coinsInput > (u.coins||0)) {
+      wMsg.textContent = "Not enough coins in your wallet.";
+      wMsg.style.color="#f43f5e"; wMsg.style.display="block"; return;
+    }
+    if (!phone) {
+      wMsg.textContent = "Enter your EcoCash phone number.";
+      wMsg.style.color="#f43f5e"; wMsg.style.display="block"; return;
+    }
+
+    const usdAmount = (coinsInput * COIN_VALUE).toFixed(2);
+    wMsg.textContent = "Processing your withdrawal...";
+    wMsg.style.color="#f59e0b"; wMsg.style.display="block";
+
+    // Save withdrawal request to Firestore
+    try {
+      const userRef = doc(db,"users",auth.currentUser.uid);
+      await updateDoc(userRef, {
+        coins: increment(-coinsInput),
+        totalEarned: increment(parseFloat(usdAmount))
+      });
+
+      await addDoc(collection(db,"withdrawals"),{
+        userId: auth.currentUser.uid,
+        userName: u.name,
+        userEmail: u.email,
+        phone: phone,
+        coins: coinsInput,
+        usdAmount: parseFloat(usdAmount),
+        method: "EcoCash",
+        status: "pending",
+        paynowIntegrationId: PAYNOW_INTEGRATION_ID,
+        createdAt: serverTimestamp(),
+        country: u.country
+      });
+
+      // Update local display
+      const newCoins = (u.coins||0) - coinsInput;
+      window.currentUser = {...u, coins: newCoins};
+      set("app-coins", fmt(newCoins));
+      set("wallet-coins", fmt(newCoins));
+      set("wallet-usd",(newCoins*COIN_VALUE).toFixed(2));
+      set("app-usd","$"+(newCoins*COIN_VALUE).toFixed(2));
+
+      wMsg.textContent = "Withdrawal request submitted! $"+usdAmount+
+        " will arrive via EcoCash within 5–30 minutes.";
+      wMsg.style.color="#10b981";
+
+      document.getElementById("withdraw-coins").value="";
+      document.getElementById("withdraw-phone").value="";
+
+    } catch(e) {
+      wMsg.textContent = "Error: "+e.message;
+      wMsg.style.color="#f43f5e";
+    }
+  };
+
+  // ── COPY REFERRAL ─────────────────────────────────────────
+  window.copyCode = function() {
+    const code = document.getElementById("app-code").textContent;
+    navigator.clipboard.writeText(code).then(()=>{
+      document.getElementById("copy-btn").textContent="✓ Copied!";
+      setTimeout(()=>document.getElementById("copy-btn").textContent="Copy Code",2000);
+    });
+  };
+
   // ── HELPERS ───────────────────────────────────────────────
-  function showMsg(id, msg, color) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.textContent = msg;
-    el.style.color = color === "red" ? "#f43f5e" : "#10b981";
-    el.style.display = "block";
+  function v(id){ const e=document.getElementById(id); return e?e.value.trim():""; }
+  function set(id,val){ const e=document.getElementById(id); if(e)e.textContent=val; }
+  function fmt(n){ return Number(n).toLocaleString(); }
+  function msg(id,text,color){
+    const e=document.getElementById(id);
+    if(!e)return;
+    e.textContent=text;
+    e.style.color=color==="red"?"#f43f5e":"#10b981";
+    e.style.display="block";
   }
-  function setLoading(id, loading) {
-    const btn = document.getElementById(id);
-    if (!btn) return;
-    btn.disabled = loading;
-    btn.style.opacity = loading ? "0.6" : "1";
-    if (loading) btn.dataset.orig = btn.textContent;
-    btn.textContent = loading ? "Please wait..." : (btn.dataset.orig || btn.textContent);
+  function btn(id,loading){
+    const e=document.getElementById(id);
+    if(!e)return;
+    e.disabled=loading;
+    e.style.opacity=loading?"0.6":"1";
+    if(loading)e.dataset.orig=e.textContent;
+    e.textContent=loading?"Please wait...":(e.dataset.orig||e.textContent);
   }
-  function friendlyError(code) {
-    const msgs = {
-      "auth/email-already-in-use": "This email is already registered. Try logging in.",
-      "auth/wrong-password": "Wrong password. Please try again.",
-      "auth/user-not-found": "No account found with this email.",
-      "auth/invalid-email": "Please enter a valid email address.",
-      "auth/weak-password": "Password must be at least 6 characters.",
-      "auth/invalid-verification-code": "Wrong OTP code. Please try again.",
-      "auth/too-many-requests": "Too many attempts. Please wait a few minutes.",
-      "auth/popup-closed-by-user": "Sign-in cancelled.",
+  function err(code){
+    const m={
+      "auth/email-already-in-use":"Email already registered. Try logging in.",
+      "auth/wrong-password":"Wrong password. Try again.",
+      "auth/user-not-found":"No account with this email.",
+      "auth/invalid-email":"Enter a valid email address.",
+      "auth/weak-password":"Password must be at least 6 characters.",
+      "auth/invalid-verification-code":"Wrong OTP code.",
+      "auth/too-many-requests":"Too many attempts. Wait a few minutes.",
+      "auth/popup-closed-by-user":"Sign-in cancelled.",
     };
-    return msgs[code] || "Something went wrong. Please try again.";
+    return m[code]||"Something went wrong. Please try again.";
   }
 </script>
 
 <style>
-:root {
-  --orange:#f97316; --gold:#fbbf24; --green:#10b981;
-  --bg:#05080f; --bg2:#0a0f1e; --bg3:#111827;
-  --surface:#1e293b; --border:rgba(255,255,255,0.07);
-  --text:#f1f5f9; --muted:#64748b;
+:root{
+  --orange:#f97316;--gold:#fbbf24;--green:#10b981;--cyan:#06b6d4;
+  --purple:#8b5cf6;--red:#f43f5e;
+  --bg:#05080f;--bg2:#0a0f1e;--bg3:#111827;
+  --surface:#1e293b;--border:rgba(255,255,255,0.07);
+  --text:#f1f5f9;--muted:#64748b;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden;}
+a{text-decoration:none;color:inherit;}
 
 /* NAV */
-nav{position:fixed;top:0;left:0;right:0;z-index:100;
-  padding:0 5%;height:65px;display:flex;align-items:center;
-  justify-content:space-between;
+nav{position:fixed;top:0;left:0;right:0;z-index:100;height:64px;
+  padding:0 5%;display:flex;align-items:center;justify-content:space-between;
   background:rgba(5,8,15,0.92);backdrop-filter:blur(20px);
   border-bottom:1px solid var(--border);}
-.logo{display:flex;align-items:center;gap:10px;text-decoration:none;}
+.logo{display:flex;align-items:center;gap:10px;}
 .logo-icon{width:38px;height:38px;border-radius:11px;
   background:linear-gradient(135deg,var(--orange),#ea580c);
-  display:flex;align-items:center;justify-content:center;font-size:20px;
-  box-shadow:0 0 18px rgba(249,115,22,0.4);}
-.logo-text{font-family:'Syne',sans-serif;font-weight:800;font-size:20px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:20px;box-shadow:0 0 18px rgba(249,115,22,0.4);}
+.logo-name{font-family:'Syne',sans-serif;font-weight:800;font-size:20px;
   background:linear-gradient(90deg,var(--orange),var(--gold));
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;}
-.nav-cta{background:linear-gradient(135deg,var(--orange),#ea580c);
+.nav-btn{background:linear-gradient(135deg,var(--orange),#ea580c);
   border:none;border-radius:10px;padding:9px 20px;
-  color:#fff;font-family:'DM Sans',sans-serif;
-  font-weight:700;font-size:14px;cursor:pointer;
-  box-shadow:0 4px 16px rgba(249,115,22,0.35);}
+  color:#fff;font-family:'DM Sans',sans-serif;font-weight:700;font-size:14px;
+  cursor:pointer;box-shadow:0 4px 16px rgba(249,115,22,0.35);}
 
 /* HERO */
-#hero-section{min-height:100vh;display:flex;flex-direction:column;
+#hero{min-height:100vh;display:flex;flex-direction:column;
   align-items:center;justify-content:center;
   text-align:center;padding:100px 5% 60px;
-  background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(249,115,22,0.12) 0%,transparent 70%),
-             var(--bg);}
-.hero-badge{display:inline-flex;align-items:center;gap:7px;
+  background:radial-gradient(ellipse 80% 50% at 50% -10%,rgba(249,115,22,0.12) 0%,transparent 70%),var(--bg);}
+.badge{display:inline-flex;align-items:center;gap:7px;
   background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.3);
   border-radius:100px;padding:6px 16px;font-size:13px;font-weight:600;
   color:var(--orange);margin-bottom:24px;}
-.pulse-dot{width:6px;height:6px;border-radius:50%;background:var(--green);
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);
   animation:pulse 2s infinite;}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(0.7)}}
-h1.hero-title{font-family:'Syne',sans-serif;
-  font-size:clamp(40px,8vw,88px);font-weight:800;
-  line-height:1.0;letter-spacing:-2px;margin-bottom:24px;}
-h1.hero-title .line1{display:block;color:var(--text);}
-h1.hero-title .line2{display:block;
-  background:linear-gradient(135deg,var(--orange),var(--gold));
+h1{font-family:'Syne',sans-serif;font-size:clamp(38px,8vw,88px);
+  font-weight:800;line-height:1.0;letter-spacing:-2px;margin-bottom:24px;}
+h1 .l1{display:block;color:var(--text);}
+h1 .l2{display:block;background:linear-gradient(135deg,var(--orange),var(--gold));
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;}
-.hero-sub{color:var(--muted);font-size:clamp(15px,2.5vw,19px);
+.sub{color:var(--muted);font-size:clamp(15px,2.5vw,19px);
   max-width:580px;line-height:1.75;margin-bottom:40px;}
-.btn-primary{background:linear-gradient(135deg,var(--orange),#ea580c);
+.btns{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-bottom:56px;}
+.btn-p{background:linear-gradient(135deg,var(--orange),#ea580c);
   border:none;border-radius:14px;padding:15px 36px;
-  color:#fff;font-family:'DM Sans',sans-serif;
-  font-size:16px;font-weight:700;cursor:pointer;
-  box-shadow:0 8px 28px rgba(249,115,22,0.4);
-  display:inline-flex;align-items:center;gap:9px;
-  text-decoration:none;transition:transform 0.2s,box-shadow 0.2s;}
-.btn-primary:hover{transform:translateY(-2px);box-shadow:0 12px 36px rgba(249,115,22,0.5);}
-.btn-outline{background:rgba(255,255,255,0.06);
-  border:1px solid rgba(255,255,255,0.12);
-  border-radius:14px;padding:15px 32px;
-  color:var(--text);font-family:'DM Sans',sans-serif;
-  font-size:16px;font-weight:600;cursor:pointer;
-  display:inline-flex;align-items:center;gap:9px;
-  text-decoration:none;transition:all 0.2s;}
-.btn-outline:hover{background:rgba(255,255,255,0.1);}
-.hero-btns{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;margin-bottom:56px;}
-
-/* STATS */
-.hero-stats{display:flex;gap:44px;flex-wrap:wrap;justify-content:center;}
-.stat-val{font-family:'Syne',sans-serif;font-size:30px;font-weight:800;
+  color:#fff;font-family:'DM Sans',sans-serif;font-size:16px;font-weight:700;
+  cursor:pointer;box-shadow:0 8px 28px rgba(249,115,22,0.4);
+  display:inline-flex;align-items:center;gap:9px;transition:all 0.2s;}
+.btn-p:hover{transform:translateY(-2px);box-shadow:0 12px 36px rgba(249,115,22,0.5);}
+.btn-o{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);
+  border-radius:14px;padding:15px 32px;color:var(--text);
+  font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;
+  cursor:pointer;display:inline-flex;align-items:center;gap:9px;transition:all 0.2s;}
+.btn-o:hover{background:rgba(255,255,255,0.1);}
+.stats{display:flex;gap:44px;flex-wrap:wrap;justify-content:center;}
+.stat-v{font-family:'Syne',sans-serif;font-size:30px;font-weight:800;
   background:linear-gradient(135deg,var(--orange),var(--gold));
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;}
-.stat-label{color:var(--muted);font-size:12px;margin-top:3px;}
+.stat-l{color:var(--muted);font-size:12px;margin-top:3px;}
 
 /* TICKER */
 .ticker-wrap{width:100%;overflow:hidden;padding:13px 0;
   border-top:1px solid var(--border);border-bottom:1px solid var(--border);
   background:rgba(249,115,22,0.04);margin-top:56px;}
-.ticker{display:flex;animation:ticker 28s linear infinite;width:max-content;}
-@keyframes ticker{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-.tick{white-space:nowrap;padding:0 28px;color:var(--muted);font-size:13px;
+.ticker{display:flex;animation:tick 28s linear infinite;width:max-content;}
+@keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+.ti{white-space:nowrap;padding:0 28px;color:var(--muted);font-size:13px;
   display:flex;align-items:center;gap:8px;}
-.tick span{color:var(--orange);}
+.ti span{color:var(--orange);}
 
 /* SECTIONS */
 section{padding:90px 5%;}
-.sec-label{display:inline-flex;align-items:center;gap:7px;
-  color:var(--orange);font-size:12px;font-weight:700;
-  letter-spacing:0.12em;text-transform:uppercase;margin-bottom:14px;}
-.sec-label::before{content:'';width:18px;height:2px;background:var(--orange);border-radius:2px;}
-h2.sec-title{font-family:'Syne',sans-serif;
-  font-size:clamp(28px,5vw,48px);font-weight:800;
-  line-height:1.1;letter-spacing:-1px;margin-bottom:16px;}
-.sec-desc{color:var(--muted);font-size:16px;line-height:1.8;max-width:540px;}
-
-/* GAMES GRID */
-.games-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
-  gap:18px;margin-top:52px;}
-.game-card{background:var(--bg2);border:1px solid var(--border);
-  border-radius:22px;padding:28px 24px;
-  transition:transform 0.3s,box-shadow 0.3s,border-color 0.3s;cursor:default;}
-.game-card:hover{transform:translateY(-5px);border-color:rgba(249,115,22,0.3);
-  box-shadow:0 18px 50px rgba(249,115,22,0.1);}
-.game-tag{display:inline-block;border-radius:20px;
-  padding:3px 10px;font-size:10px;font-weight:800;
-  letter-spacing:0.08em;margin-bottom:16px;}
-.game-icon{font-size:40px;margin-bottom:14px;display:block;}
-.game-card h3{font-family:'Syne',sans-serif;font-size:18px;font-weight:700;margin-bottom:9px;}
-.game-card p{color:var(--muted);font-size:13px;line-height:1.7;margin-bottom:16px;}
-.game-reward{font-size:13px;font-weight:700;}
+.sl{display:inline-flex;align-items:center;gap:7px;color:var(--orange);
+  font-size:12px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:14px;}
+.sl::before{content:'';width:18px;height:2px;background:var(--orange);border-radius:2px;}
+h2{font-family:'Syne',sans-serif;font-size:clamp(28px,5vw,48px);
+  font-weight:800;line-height:1.1;letter-spacing:-1px;margin-bottom:16px;}
+.sd{color:var(--muted);font-size:16px;line-height:1.8;max-width:540px;}
 
 /* HOW IT WORKS */
-.how-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+.how{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
   gap:2px;margin-top:52px;border:1px solid var(--border);
   border-radius:22px;overflow:hidden;}
-.how-card{background:var(--bg2);padding:36px 30px;transition:background 0.3s;}
-.how-card:hover{background:rgba(249,115,22,0.04);}
-.how-card+.how-card{border-left:1px solid var(--border);}
-.how-num{font-family:'Syne',sans-serif;font-size:56px;font-weight:800;
+.hc{background:var(--bg2);padding:36px 30px;transition:background 0.3s;}
+.hc:hover{background:rgba(249,115,22,0.04);}
+.hc+.hc{border-left:1px solid var(--border);}
+.hn{font-family:'Syne',sans-serif;font-size:56px;font-weight:800;
   color:rgba(249,115,22,0.1);line-height:1;margin-bottom:20px;}
-.how-icon{font-size:32px;margin-bottom:14px;}
-.how-card h3{font-family:'Syne',sans-serif;font-size:18px;font-weight:700;margin-bottom:10px;}
-.how-card p{color:var(--muted);font-size:14px;line-height:1.7;}
+.hi{font-size:32px;margin-bottom:14px;}
+.hc h3{font-family:'Syne',sans-serif;font-size:18px;font-weight:700;margin-bottom:10px;}
+.hc p{color:var(--muted);font-size:14px;line-height:1.7;}
+
+/* GAMES */
+.gg{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+  gap:18px;margin-top:52px;}
+.gc{background:var(--bg2);border:1px solid var(--border);border-radius:22px;
+  padding:28px 24px;transition:all 0.3s;cursor:default;}
+.gc:hover{transform:translateY(-5px);border-color:rgba(249,115,22,0.3);
+  box-shadow:0 18px 50px rgba(249,115,22,0.1);}
+.gt{display:inline-block;border-radius:20px;padding:3px 10px;
+  font-size:10px;font-weight:800;letter-spacing:0.08em;margin-bottom:16px;}
+.gi{font-size:40px;margin-bottom:14px;display:block;}
+.gc h3{font-family:'Syne',sans-serif;font-size:18px;font-weight:700;margin-bottom:9px;}
+.gc p{color:var(--muted);font-size:13px;line-height:1.7;margin-bottom:16px;}
+.gr{font-size:13px;font-weight:700;}
 
 /* PAYMENTS */
-.pay-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+.pg{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
   gap:12px;margin-top:48px;}
-.pay-card{background:var(--bg2);border:1px solid var(--border);
-  border-radius:16px;padding:18px 14px;text-align:center;
-  transition:all 0.3s;}
-.pay-card:hover{border-color:rgba(249,115,22,0.3);transform:translateY(-3px);}
-.pay-flag{font-size:32px;margin-bottom:8px;}
-.pay-name{font-family:'Syne',sans-serif;font-weight:700;font-size:13px;margin-bottom:4px;}
-.pay-method{color:var(--muted);font-size:11px;}
-.pay-status{margin-top:8px;font-size:10px;font-weight:700;color:var(--green);
+.pc{background:var(--bg2);border:1px solid var(--border);border-radius:16px;
+  padding:18px 14px;text-align:center;transition:all 0.3s;}
+.pc:hover{border-color:rgba(249,115,22,0.3);transform:translateY(-3px);}
+.pf{font-size:32px;margin-bottom:8px;}
+.pn{font-family:'Syne',sans-serif;font-weight:700;font-size:13px;margin-bottom:4px;}
+.pm{color:var(--muted);font-size:11px;}
+.ps{margin-top:8px;font-size:10px;font-weight:700;color:var(--green);
   display:flex;align-items:center;gap:4px;justify-content:center;}
-.pay-status::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--green);}
+.ps::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--green);}
 
-/* AUTH SECTION */
-#auth-section{padding:90px 5%;
-  background:linear-gradient(180deg,var(--bg) 0%,var(--bg2) 100%);}
-.auth-container{max-width:480px;margin:0 auto;}
-.auth-tabs{display:flex;background:var(--bg3);border-radius:14px;
-  padding:4px;margin-bottom:24px;gap:4px;}
-.auth-tab{flex:1;padding:10px;border-radius:11px;border:none;
-  background:transparent;color:var(--muted);font-family:'DM Sans',sans-serif;
-  font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;}
-.auth-tab.active{background:var(--orange);color:#fff;}
-.auth-panel{display:none;}
-.auth-panel.active{display:block;}
-.form-group{margin-bottom:14px;}
-.form-label{display:block;color:var(--muted);font-size:11px;
-  font-weight:700;letter-spacing:0.06em;margin-bottom:6px;}
-.form-input{width:100%;background:var(--bg3);border:1px solid var(--surface);
+/* AUTH */
+#auth{padding:90px 5%;background:linear-gradient(180deg,var(--bg) 0%,var(--bg2) 100%);}
+.ac{max-width:480px;margin:0 auto;}
+.atabs{display:flex;background:var(--bg3);border-radius:14px;padding:4px;
+  margin-bottom:24px;gap:4px;}
+.atab{flex:1;padding:10px;border-radius:11px;border:none;background:transparent;
+  color:var(--muted);font-family:'DM Sans',sans-serif;font-size:13px;
+  font-weight:600;cursor:pointer;transition:all 0.2s;}
+.atab.on{background:var(--orange);color:#fff;}
+.ap{display:none;}
+.ap.on{display:block;}
+.fl{margin-bottom:14px;}
+.fl label{display:block;color:var(--muted);font-size:11px;font-weight:700;
+  letter-spacing:0.06em;margin-bottom:6px;}
+.fi{width:100%;background:var(--bg3);border:1px solid var(--surface);
   border-radius:11px;padding:13px 14px;color:var(--text);
-  font-family:'DM Sans',sans-serif;font-size:15px;outline:none;
-  transition:border-color 0.2s;}
-.form-input:focus{border-color:var(--orange);}
-.form-input::placeholder{color:var(--muted);}
-.auth-btn{width:100%;background:linear-gradient(135deg,var(--orange),#ea580c);
-  border:none;border-radius:12px;padding:15px;
-  color:#fff;font-family:'DM Sans',sans-serif;
-  font-size:16px;font-weight:800;cursor:pointer;
-  box-shadow:0 4px 20px rgba(249,115,22,0.4);
-  transition:opacity 0.2s;margin-top:4px;}
-.auth-btn:disabled{opacity:0.6;cursor:not-allowed;}
-.google-btn{width:100%;background:#fff;border:1px solid #e2e8f0;
-  border-radius:12px;padding:14px;
-  color:#1e293b;font-family:'DM Sans',sans-serif;
-  font-size:15px;font-weight:700;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;gap:10px;
-  margin-bottom:16px;transition:all 0.2s;}
-.google-btn:hover{background:#f8fafc;transform:translateY(-1px);}
-.divider{text-align:center;color:var(--muted);font-size:13px;
-  margin:14px 0;position:relative;}
-.divider::before,.divider::after{content:'';position:absolute;
-  top:50%;width:42%;height:1px;background:var(--border);}
-.divider::before{left:0;}.divider::after{right:0;}
-.auth-msg{font-size:13px;margin-top:10px;display:none;font-weight:600;}
-.bonus-badge{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);
+  font-family:'DM Sans',sans-serif;font-size:15px;outline:none;transition:border-color 0.2s;}
+.fi:focus{border-color:var(--orange);}
+.fi::placeholder{color:var(--muted);}
+.ab{width:100%;background:linear-gradient(135deg,var(--orange),#ea580c);
+  border:none;border-radius:12px;padding:15px;color:#fff;
+  font-family:'DM Sans',sans-serif;font-size:16px;font-weight:800;
+  cursor:pointer;box-shadow:0 4px 20px rgba(249,115,22,0.4);margin-top:4px;}
+.ab:disabled{opacity:0.6;cursor:not-allowed;}
+.gb{width:100%;background:#fff;border:1px solid #e2e8f0;border-radius:12px;
+  padding:14px;color:#1e293b;font-family:'DM Sans',sans-serif;font-size:15px;
+  font-weight:700;cursor:pointer;display:flex;align-items:center;
+  justify-content:center;gap:10px;margin-bottom:14px;transition:all 0.2s;}
+.gb:hover{background:#f8fafc;}
+.div{text-align:center;color:var(--muted);font-size:13px;margin:14px 0;
+  position:relative;}
+.div::before,.div::after{content:'';position:absolute;top:50%;
+  width:42%;height:1px;background:var(--border);}
+.div::before{left:0;}.div::after{right:0;}
+.am{font-size:13px;margin-top:10px;display:none;font-weight:600;}
+.bonus{background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.25);
   border-radius:12px;padding:12px 16px;margin-bottom:20px;
   display:flex;gap:10px;align-items:center;}
-.bonus-badge-icon{font-size:20px;}
-.bonus-badge-text strong{display:block;color:var(--green);font-size:13px;font-weight:800;}
-.bonus-badge-text span{color:var(--muted);font-size:12px;}
+.bonus strong{display:block;color:var(--green);font-size:13px;font-weight:800;}
+.bonus span{color:var(--muted);font-size:12px;}
 
-/* APP SCREEN (after login) */
-#app-screen{display:none;min-height:100vh;padding:80px 5% 60px;
+/* APP SCREEN */
+#app-screen{display:none;min-height:100vh;
+  padding:80px 5% 60px;
   background:linear-gradient(160deg,#0a0612,#1a0a2e,#0d1b2a);}
-.app-header{display:flex;justify-content:space-between;
-  align-items:center;margin-bottom:24px;}
-.app-welcome{color:var(--muted);font-size:13px;}
-.app-username{color:var(--text);font-size:22px;font-weight:800;}
-.app-coins-badge{background:linear-gradient(135deg,var(--orange),#ea580c);
+.ah{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;}
+.aw{color:var(--muted);font-size:13px;}
+.au{color:var(--text);font-size:21px;font-weight:800;}
+.ac2{display:flex;flex-direction:column;align-items:flex-end;gap:8px;}
+.cb{background:linear-gradient(135deg,var(--orange),#ea580c);
   border-radius:13px;padding:10px 16px;
   display:flex;align-items:center;gap:7px;
   box-shadow:0 4px 16px rgba(249,115,22,0.4);}
-.app-coins-badge span{color:#fff;font-family:'Syne',sans-serif;font-weight:800;font-size:18px;}
-.app-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:22px;}
-.app-stat{background:rgba(255,255,255,0.07);border-radius:14px;
-  padding:14px 10px;text-align:center;border:1px solid rgba(255,255,255,0.07);}
-.app-stat-val{color:var(--text);font-family:'Syne',sans-serif;font-weight:800;font-size:16px;}
-.app-stat-label{color:var(--muted);font-size:10px;margin-top:3px;}
-.app-card{background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.07);
+.cb span{color:#fff;font-family:'Syne',sans-serif;font-weight:800;font-size:18px;}
+.so{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);
+  border-radius:10px;padding:9px 18px;color:var(--muted);
+  font-family:'DM Sans',sans-serif;font-weight:600;font-size:13px;cursor:pointer;}
+.as{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:20px;}
+.as-i{background:rgba(255,255,255,0.07);border-radius:14px;
+  padding:13px 8px;text-align:center;border:1px solid rgba(255,255,255,0.07);}
+.as-v{color:var(--text);font-family:'Syne',sans-serif;font-weight:800;font-size:15px;}
+.as-l{color:var(--muted);font-size:10px;margin-top:3px;}
+.acard{background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.07);
   border-radius:20px;padding:20px;margin-bottom:16px;}
-.app-card-title{font-family:'Syne',sans-serif;font-weight:800;font-size:15px;margin-bottom:14px;}
-.app-games-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
-.app-game{background:rgba(255,255,255,0.06);border-radius:16px;
-  padding:16px 13px;border:1px solid rgba(255,255,255,0.08);cursor:pointer;
-  transition:transform 0.2s;}
-.app-game:hover{transform:scale(1.02);}
-.app-game-icon{font-size:28px;margin-bottom:8px;}
-.app-game-name{color:var(--text);font-weight:700;font-size:13px;margin-bottom:4px;}
-.app-game-reward{font-size:12px;font-weight:700;}
-.ref-box{background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.25);
-  border-radius:14px;padding:18px;margin-bottom:16px;}
-.ref-code{background:rgba(255,255,255,0.08);border-radius:10px;
-  padding:14px;text-align:center;margin:12px 0;
+.acard-t{font-family:'Syne',sans-serif;font-weight:800;font-size:15px;margin-bottom:14px;}
+.agrid{display:grid;grid-template-columns:1fr 1fr;gap:11px;}
+.agame{background:rgba(255,255,255,0.06);border-radius:16px;padding:16px 13px;
+  border:1px solid rgba(255,255,255,0.08);cursor:pointer;transition:transform 0.2s;}
+.agame:hover{transform:scale(1.02);}
+.agame-i{font-size:28px;margin-bottom:8px;}
+.agame-n{color:var(--text);font-weight:700;font-size:13px;margin-bottom:4px;}
+.agame-r{font-size:12px;font-weight:700;}
+
+/* WALLET */
+.wbal{background:linear-gradient(135deg,var(--orange),#ea580c);
+  border-radius:20px;padding:24px;margin-bottom:16px;
+  box-shadow:0 10px 40px rgba(249,115,22,0.4);}
+.wbal-l{color:rgba(255,255,255,0.7);font-size:11px;font-weight:700;
+  letter-spacing:0.1em;margin-bottom:6px;}
+.wbal-v{color:#fff;font-family:'Syne',sans-serif;font-size:42px;font-weight:800;
+  display:flex;align-items:center;gap:10px;}
+.wbal-u{color:rgba(255,255,255,0.8);font-size:16px;font-weight:700;margin-top:4px;}
+.wi{width:100%;background:rgba(255,255,255,0.08);
+  border:1px solid rgba(255,255,255,0.15);
+  border-radius:11px;padding:13px 14px;color:var(--text);
+  font-family:'DM Sans',sans-serif;font-size:15px;outline:none;margin-bottom:11px;}
+.wi::placeholder{color:rgba(255,255,255,0.3);}
+.wi:focus{border-color:var(--orange);}
+.wb{width:100%;background:linear-gradient(135deg,var(--green),#059669);
+  border:none;border-radius:12px;padding:14px;color:#fff;
+  font-family:'DM Sans',sans-serif;font-size:15px;font-weight:800;cursor:pointer;}
+.wm{font-size:13px;margin-top:10px;display:none;font-weight:600;}
+
+/* REFERRAL */
+.rb{background:rgba(139,92,246,0.12);border:1px solid rgba(139,92,246,0.25);
+  border-radius:16px;padding:18px;margin-bottom:16px;}
+.rc{background:rgba(255,255,255,0.08);border-radius:10px;padding:14px;
+  text-align:center;margin:12px 0;
   font-family:monospace;font-size:22px;font-weight:900;
   color:#8b5cf6;letter-spacing:5px;}
-.ref-copy-btn{width:100%;background:#8b5cf6;border:none;border-radius:10px;
+.rcb{width:100%;background:#8b5cf6;border:none;border-radius:10px;
   padding:12px;color:#fff;font-weight:700;font-size:14px;cursor:pointer;}
-.signout-btn{background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);
-  border-radius:10px;padding:11px 22px;color:var(--muted);
-  font-family:'DM Sans',sans-serif;font-weight:600;font-size:14px;cursor:pointer;}
+
+/* FAQ */
+.faq{max-width:720px;margin:52px auto 0;}
+.fq{border-bottom:1px solid var(--border);overflow:hidden;}
+.fqb{width:100%;background:none;border:none;color:var(--text);
+  font-family:'DM Sans',sans-serif;font-size:15px;font-weight:600;
+  padding:22px 0;cursor:pointer;display:flex;justify-content:space-between;
+  align-items:center;gap:16px;text-align:left;}
+.fqb:hover{color:var(--orange);}
+.fqi{font-size:18px;color:var(--orange);transition:transform 0.3s;flex-shrink:0;}
+.fqi.open{transform:rotate(45deg);}
+.fqa{color:var(--muted);font-size:14px;line-height:1.8;
+  max-height:0;overflow:hidden;transition:max-height 0.4s,padding 0.3s;}
+.fqa.open{max-height:300px;padding-bottom:22px;}
+
+/* CTA */
+#cta{padding:100px 5%;}
+.ctab{background:linear-gradient(135deg,rgba(249,115,22,0.1),rgba(139,92,246,0.08));
+  border:1px solid rgba(249,115,22,0.2);border-radius:32px;
+  padding:70px 50px;text-align:center;max-width:900px;margin:0 auto;
+  position:relative;overflow:hidden;}
+.ctab h2{font-family:'Syne',sans-serif;font-size:clamp(28px,5vw,52px);
+  font-weight:800;letter-spacing:-1px;margin-bottom:18px;}
+.ctab p{color:var(--muted);font-size:16px;max-width:480px;
+  margin:0 auto 36px;line-height:1.7;}
 
 /* FOOTER */
-footer{background:var(--bg2);border-top:1px solid var(--border);
-  padding:48px 5% 32px;}
-.footer-bottom{display:flex;justify-content:space-between;
-  align-items:center;flex-wrap:wrap;gap:10px;
-  margin-top:32px;padding-top:24px;border-top:1px solid var(--border);}
-.footer-bottom p{color:var(--muted);font-size:13px;}
+footer{background:var(--bg2);border-top:1px solid var(--border);padding:48px 5% 32px;}
+.fb{display:flex;justify-content:space-between;align-items:center;
+  flex-wrap:wrap;gap:10px;margin-top:28px;padding-top:24px;
+  border-top:1px solid var(--border);}
+.fb p{color:var(--muted);font-size:13px;}
 
-/* RESPONSIVE */
-@media(max-width:600px){
-  .how-card+.how-card{border-left:none;border-top:1px solid var(--border);}
-  .hero-btns{flex-direction:column;align-items:center;}
-  .app-stats{grid-template-columns:1fr 1fr;}
+@media(max-width:700px){
+  .hc+.hc{border-left:none;border-top:1px solid var(--border);}
+  .btns{flex-direction:column;align-items:center;}
+  .as{grid-template-columns:1fr 1fr;}
+  .ctab{padding:40px 20px;}
 }
-
-/* Fade in */
 @keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
 .fade{animation:fadeUp 0.5s both;}
 </style>
 </head>
 <body>
 
-<!-- RECAPTCHA container (invisible) -->
-<div id="recaptcha-container"></div>
+<div id="recaptcha-box"></div>
 
 <!-- NAV -->
 <nav>
-  <a href="#" class="logo">
+  <div class="logo">
     <div class="logo-icon">🌐</div>
-    <span class="logo-text">PlaySphere</span>
-  </a>
-  <button class="nav-cta" onclick="document.getElementById('auth-section').scrollIntoView({behavior:'smooth'})">
+    <span class="logo-name">PlaySphere</span>
+  </div>
+  <button class="nav-btn"
+    onclick="document.getElementById('auth').scrollIntoView({behavior:'smooth'})">
     Play Now — Free
   </button>
 </nav>
 
-<!-- HERO -->
-<section id="hero-section">
-  <div class="hero-badge">
-    <div class="pulse-dot"></div>
-    Now Live — Zimbabwe, Nigeria, Kenya &amp; 12 more countries
-  </div>
-  <h1 class="hero-title">
-    <span class="line1">Play Smart.</span>
-    <span class="line2">Earn Real Money.</span>
-  </h1>
-  <p class="hero-sub">
-    Compete in skill-based games — trivia, math, word puzzles and memory challenges — and withdraw your earnings via EcoCash, M-Pesa, PayPal or bank transfer.
-  </p>
-  <div class="hero-btns">
-    <button class="btn-primary" onclick="document.getElementById('auth-section').scrollIntoView({behavior:'smooth'})">
-      🎮 Start Playing Free
-    </button>
-    <a href="#how" class="btn-outline">See How It Works ↓</a>
-  </div>
-  <div class="hero-stats">
-    <div class="stat"><div class="stat-val">10,284+</div><div class="stat-label">Active Players</div></div>
-    <div class="stat"><div class="stat-val">$48,920</div><div class="stat-label">Paid Out This Month</div></div>
-    <div class="stat"><div class="stat-val">15</div><div class="stat-label">Countries</div></div>
-    <div class="stat"><div class="stat-val">48,920</div><div class="stat-label">Games Today</div></div>
-  </div>
-  <div class="ticker-wrap">
-    <div class="ticker">
-      <div class="tick">🇿🇼 Chiedza withdrew <span>$4.50 via EcoCash</span></div>
-      <div class="tick">🇳🇬 Amara won Tournament — <span>+500 coins</span></div>
-      <div class="tick">🇰🇪 Wanjiku withdrew <span>$2.10 via M-Pesa</span></div>
-      <div class="tick">🇬🇭 Kofi scored 7/7 — <span>Perfect Score!</span></div>
-      <div class="tick">🇿🇼 Farai referred 3 friends — <span>+450 bonus coins</span></div>
-      <div class="tick">🇿🇦 Sipho withdrew <span>$2.50 via Bank</span></div>
-      <div class="tick">🇺🇬 Aisha reached Level 10 — <span>VIP unlocked</span></div>
-      <div class="tick">🇿🇼 Chiedza withdrew <span>$4.50 via EcoCash</span></div>
-      <div class="tick">🇳🇬 Amara won Tournament — <span>+500 coins</span></div>
-      <div class="tick">🇰🇪 Wanjiku withdrew <span>$2.10 via M-Pesa</span></div>
-      <div class="tick">🇬🇭 Kofi scored 7/7 — <span>Perfect Score!</span></div>
-      <div class="tick">🇿🇼 Farai referred 3 friends — <span>+450 bonus coins</span></div>
-      <div class="tick">🇿🇦 Sipho withdrew <span>$2.50 via Bank</span></div>
-      <div class="tick">🇺🇬 Aisha reached Level 10 — <span>VIP unlocked</span></div>
-    </div>
-  </div>
-</section>
+<!-- MAIN CONTENT (hidden after login) -->
+<div id="main-content">
 
-<!-- HOW IT WORKS -->
-<section id="how" style="background:var(--bg2)">
-  <div class="sec-label">How It Works</div>
-  <h2 class="sec-title">Simple. Fair. Rewarding.</h2>
-  <p class="sec-desc">No luck. No subscriptions. Just your skill and your earnings paid to your phone.</p>
-  <div class="how-grid">
-    <div class="how-card">
-      <div class="how-num">01</div>
-      <div class="how-icon">📱</div>
-      <h3>Sign Up Free</h3>
-      <p>Create your account in 60 seconds with your phone, email or Google. Get 50 free coins instantly.</p>
+  <!-- HERO -->
+  <section id="hero">
+    <div class="badge"><div class="dot"></div>
+      Now Live — Zimbabwe, Nigeria, Kenya &amp; 12 more countries
     </div>
-    <div class="how-card">
-      <div class="how-num">02</div>
-      <div class="how-icon">🎮</div>
-      <h3>Play &amp; Earn</h3>
-      <p>Choose from 4 skill-based games. Answer correctly and beat opponents to earn PlayCoins every round.</p>
+    <h1>
+      <span class="l1">Play Smart.</span>
+      <span class="l2">Earn Real Money.</span>
+    </h1>
+    <p class="sub">
+      Compete in skill-based games — trivia, math, word puzzles and memory challenges —
+      and withdraw your earnings via EcoCash, M-Pesa, PayPal or bank transfer.
+    </p>
+    <div class="btns">
+      <button class="btn-p"
+        onclick="document.getElementById('auth').scrollIntoView({behavior:'smooth'})">
+        🎮 Start Playing Free
+      </button>
+      <button class="btn-o"
+        onclick="document.getElementById('how').scrollIntoView({behavior:'smooth'})">
+        See How It Works ↓
+      </button>
     </div>
-    <div class="how-card">
-      <div class="how-num">03</div>
-      <div class="how-icon">👛</div>
-      <h3>Stack Your Wallet</h3>
-      <p>Coins accumulate in your secure wallet. Play daily challenges and join tournaments for bigger rewards.</p>
+    <div class="stats">
+      <div><div class="stat-v">10,284+</div><div class="stat-l">Active Players</div></div>
+      <div><div class="stat-v">$48,920</div><div class="stat-l">Paid Out This Month</div></div>
+      <div><div class="stat-v">15</div><div class="stat-l">Countries</div></div>
+      <div><div class="stat-v">48,920</div><div class="stat-l">Games Today</div></div>
     </div>
-    <div class="how-card">
-      <div class="how-num">04</div>
-      <div class="how-icon">💸</div>
-      <h3>Withdraw Anytime</h3>
-      <p>Cash out via EcoCash, M-Pesa, PayPal or bank. Funds arrive within 5–30 minutes.</p>
-    </div>
-  </div>
-</section>
-
-<!-- GAMES -->
-<section style="background:var(--bg)">
-  <div class="sec-label">The Games</div>
-  <h2 class="sec-title">4 Games. All Skill. All Rewarding.</h2>
-  <p class="sec-desc">Every game is skill-based — no chance, no pay-to-win. The smarter you play, the more you earn.</p>
-  <div class="games-grid">
-    <div class="game-card">
-      <div class="game-tag" style="background:rgba(99,102,241,0.15);color:#6366f1;border:1px solid rgba(99,102,241,0.3)">MOST POPULAR</div>
-      <span class="game-icon">🧠</span>
-      <h3>Trivia Blitz</h3>
-      <p>Hard global questions on Geography, Science, History and Tech. 20 seconds per question. Streaks multiply rewards.</p>
-      <div class="game-reward" style="color:#6366f1">🪙 15–60 coins per round</div>
-    </div>
-    <div class="game-card">
-      <div class="game-tag" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3)">HIGH REWARD</div>
-      <span class="game-icon">🔢</span>
-      <h3>Math Blitz</h3>
-      <p>Algebra, geometry and mental arithmetic in 12 seconds each. Perfect scores unlock big bonuses.</p>
-      <div class="game-reward" style="color:#10b981">🪙 20–80 coins per round</div>
-    </div>
-    <div class="game-card">
-      <div class="game-tag" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3)">NEW</div>
-      <span class="game-icon">🔤</span>
-      <h3>Word Scramble</h3>
-      <p>Unscramble complex words from technology, politics and science before the clock runs out.</p>
-      <div class="game-reward" style="color:#f59e0b">🪙 10–50 coins per round</div>
-    </div>
-    <div class="game-card">
-      <div class="game-tag" style="background:rgba(244,63,94,0.15);color:#f43f5e;border:1px solid rgba(244,63,94,0.3)">BONUS</div>
-      <span class="game-icon">🃏</span>
-      <h3>Memory Match</h3>
-      <p>Flip and match emoji pairs in 60 seconds. Match all 6 pairs for a massive perfect-round bonus.</p>
-      <div class="game-reward" style="color:#f43f5e">🪙 25–100 coins per round</div>
-    </div>
-  </div>
-</section>
-
-<!-- PAYMENTS -->
-<section style="background:var(--bg2)">
-  <div class="sec-label">Payments</div>
-  <h2 class="sec-title">Your Money. Your Way.</h2>
-  <p class="sec-desc">Built for Africa and the world. Cash out the way your country works — no PayPal required.</p>
-  <div class="pay-grid">
-    <div class="pay-card"><div class="pay-flag">🇿🇼</div><div class="pay-name">Zimbabwe</div><div class="pay-method">EcoCash · ZB Bank</div><div class="pay-status">Available</div></div>
-    <div class="pay-card"><div class="pay-flag">🇳🇬</div><div class="pay-name">Nigeria</div><div class="pay-method">Bank · Flutterwave</div><div class="pay-status">Available</div></div>
-    <div class="pay-card"><div class="pay-flag">🇰🇪</div><div class="pay-name">Kenya</div><div class="pay-method">M-Pesa · Equity</div><div class="pay-status">Available</div></div>
-    <div class="pay-card"><div class="pay-flag">🇬🇭</div><div class="pay-name">Ghana</div><div class="pay-method">MTN MoMo · Bank</div><div class="pay-status">Available</div></div>
-    <div class="pay-card"><div class="pay-flag">🇿🇦</div><div class="pay-name">South Africa</div><div class="pay-method">PayFast · Bank</div><div class="pay-status">Available</div></div>
-    <div class="pay-card"><div class="pay-flag">🇺🇬</div><div class="pay-name">Uganda</div><div class="pay-method">Airtel · MTN</div><div class="pay-status">Available</div></div>
-    <div class="pay-card"><div class="pay-flag">🇮🇳</div><div class="pay-name">India</div><div class="pay-method">UPI · Bank</div><div class="pay-status">Available</div></div>
-    <div class="pay-card"><div class="pay-flag">🌍</div><div class="pay-name">International</div><div class="pay-method">PayPal · Stripe</div><div class="pay-status">Available</div></div>
-  </div>
-</section>
-
-<!-- AUTH SECTION — REAL FIREBASE LOGIN -->
-<section id="auth-section">
-  <div class="auth-container fade">
-    <div style="text-align:center;margin-bottom:28px">
-      <div class="sec-label" style="justify-content:center">Join PlaySphere</div>
-      <h2 class="sec-title" style="font-size:clamp(26px,4vw,38px)">Create Your Free Account</h2>
-      <p style="color:var(--muted);font-size:14px">Real phone verification · Real earnings · Real withdrawals</p>
-    </div>
-
-    <div class="bonus-badge">
-      <div class="bonus-badge-icon">🎁</div>
-      <div class="bonus-badge-text">
-        <strong>Welcome Bonus — 50 Free Coins!</strong>
-        <span>Sign up now and get 50 coins to start playing immediately</span>
+    <div class="ticker-wrap">
+      <div class="ticker">
+        <div class="ti">🇿🇼 Chiedza withdrew <span>$4.50 via EcoCash</span></div>
+        <div class="ti">🇳🇬 Amara won Tournament — <span>+500 coins</span></div>
+        <div class="ti">🇰🇪 Wanjiku withdrew <span>$2.10 via M-Pesa</span></div>
+        <div class="ti">🇬🇭 Kofi scored 7/7 — <span>Perfect Score!</span></div>
+        <div class="ti">🇿🇼 Farai referred 3 friends — <span>+450 bonus coins</span></div>
+        <div class="ti">🇿🇦 Sipho withdrew <span>$2.50 via Bank</span></div>
+        <div class="ti">🇿🇼 Chiedza withdrew <span>$4.50 via EcoCash</span></div>
+        <div class="ti">🇳🇬 Amara won Tournament — <span>+500 coins</span></div>
+        <div class="ti">🇰🇪 Wanjiku withdrew <span>$2.10 via M-Pesa</span></div>
+        <div class="ti">🇬🇭 Kofi scored 7/7 — <span>Perfect Score!</span></div>
+        <div class="ti">🇿🇼 Farai referred 3 friends — <span>+450 bonus coins</span></div>
+        <div class="ti">🇿🇦 Sipho withdrew <span>$2.50 via Bank</span></div>
       </div>
     </div>
+  </section>
 
-    <!-- Tab switcher -->
-    <div class="auth-tabs">
-      <button class="auth-tab active" onclick="switchAuthTab('phone',this)">📱 Phone</button>
-      <button class="auth-tab" onclick="switchAuthTab('email',this)">📧 Email</button>
-      <button class="auth-tab" onclick="switchAuthTab('google',this)">🔍 Google</button>
-      <button class="auth-tab" onclick="switchAuthTab('login',this)">🔑 Login</button>
+  <!-- HOW IT WORKS -->
+  <section id="how" style="background:var(--bg2)">
+    <div class="sl">How It Works</div>
+    <h2>Simple. Fair. Rewarding.</h2>
+    <p class="sd">No luck. No subscriptions. Just your skill and your earnings paid to your phone.</p>
+    <div class="how">
+      <div class="hc">
+        <div class="hn">01</div><div class="hi">📱</div>
+        <h3>Sign Up Free</h3>
+        <p>Create your account in 60 seconds with your phone number, email or Google. Get 50 free coins instantly.</p>
+      </div>
+      <div class="hc">
+        <div class="hn">02</div><div class="hi">🎮</div>
+        <h3>Play &amp; Earn</h3>
+        <p>Choose from 4 skill-based games. Answer correctly and beat opponents to earn PlayCoins every round.</p>
+      </div>
+      <div class="hc">
+        <div class="hn">03</div><div class="hi">👛</div>
+        <h3>Stack Your Wallet</h3>
+        <p>Coins accumulate in your secure wallet. Play daily challenges and tournaments for bigger rewards.</p>
+      </div>
+      <div class="hc">
+        <div class="hn">04</div><div class="hi">💸</div>
+        <h3>Withdraw Anytime</h3>
+        <p>Cash out via EcoCash, M-Pesa, PayPal or bank. Powered by Paynow Zimbabwe. Funds in 5–30 minutes.</p>
+      </div>
     </div>
+  </section>
 
-    <!-- PHONE AUTH -->
-    <div class="auth-panel active" id="panel-phone">
-      <div id="ph-step1">
-        <div class="form-group">
-          <label class="form-label">YOUR NAME</label>
-          <input id="ph-name" class="form-input" placeholder="e.g. Tafadzwa Moyo" type="text"/>
+  <!-- GAMES -->
+  <section style="background:var(--bg)">
+    <div class="sl">The Games</div>
+    <h2>4 Games. All Skill. All Rewarding.</h2>
+    <p class="sd">Every game is skill-based — no luck, no pay-to-win. The smarter you play, the more you earn.</p>
+    <div class="gg">
+      <div class="gc">
+        <div class="gt" style="background:rgba(99,102,241,0.15);color:#6366f1;border:1px solid rgba(99,102,241,0.3)">MOST POPULAR</div>
+        <span class="gi">🧠</span><h3>Trivia Blitz</h3>
+        <p>Hard global questions on Geography, Science, History and Tech. 20 seconds per question. Streaks multiply rewards.</p>
+        <div class="gr" style="color:#6366f1">🪙 15–60 coins per round</div>
+      </div>
+      <div class="gc">
+        <div class="gt" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3)">HIGH REWARD</div>
+        <span class="gi">🔢</span><h3>Math Blitz</h3>
+        <p>Algebra, geometry and mental arithmetic in 12 seconds each. Perfect scores unlock big bonuses.</p>
+        <div class="gr" style="color:#10b981">🪙 20–80 coins per round</div>
+      </div>
+      <div class="gc">
+        <div class="gt" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3)">NEW</div>
+        <span class="gi">🔤</span><h3>Word Scramble</h3>
+        <p>Unscramble complex words from technology, politics and science before the clock runs out.</p>
+        <div class="gr" style="color:#f59e0b">🪙 10–50 coins per round</div>
+      </div>
+      <div class="gc">
+        <div class="gt" style="background:rgba(244,63,94,0.15);color:#f43f5e;border:1px solid rgba(244,63,94,0.3)">BONUS</div>
+        <span class="gi">🃏</span><h3>Memory Match</h3>
+        <p>Flip and match emoji pairs in 60 seconds. Match all 6 pairs for a massive perfect-round bonus.</p>
+        <div class="gr" style="color:#f43f5e">🪙 25–100 coins per round</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PAYMENTS -->
+  <section style="background:var(--bg2)">
+    <div class="sl">Payments</div>
+    <h2>Your Money. Your Way.</h2>
+    <p class="sd">Built for Africa. Powered by Paynow Zimbabwe. Cash out via EcoCash, M-Pesa, PayPal and more.</p>
+    <div style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.2);
+      border-radius:16px;padding:16px 20px;margin-bottom:28px;
+      display:flex;gap:12px;align-items:center">
+      <span style="font-size:24px">🇿🇼</span>
+      <div>
+        <div style="color:var(--orange);font-weight:800;font-size:14px">
+          Powered by Paynow Zimbabwe
         </div>
-        <div class="form-group">
-          <label class="form-label">PHONE NUMBER</label>
-          <input id="ph-number" class="form-input" placeholder="+263771234567 or 0771234567" type="tel"/>
+        <div style="color:var(--muted);font-size:13px">
+          Zimbabwe's leading payment platform — EcoCash, ZB Bank, CBZ, Zimswitch and more
         </div>
-        <div class="form-group">
-          <label class="form-label">COUNTRY</label>
-          <select id="ph-country" class="form-input">
+      </div>
+    </div>
+    <div class="pg">
+      <div class="pc"><div class="pf">🇿🇼</div><div class="pn">Zimbabwe</div><div class="pm">EcoCash · ZB Bank</div><div class="ps">Live Now</div></div>
+      <div class="pc"><div class="pf">🇳🇬</div><div class="pn">Nigeria</div><div class="pm">Bank · Flutterwave</div><div class="ps">Live Now</div></div>
+      <div class="pc"><div class="pf">🇰🇪</div><div class="pn">Kenya</div><div class="pm">M-Pesa · Equity</div><div class="ps">Live Now</div></div>
+      <div class="pc"><div class="pf">🇬🇭</div><div class="pn">Ghana</div><div class="pm">MTN MoMo · Bank</div><div class="ps">Live Now</div></div>
+      <div class="pc"><div class="pf">🇿🇦</div><div class="pn">South Africa</div><div class="pm">PayFast · Bank</div><div class="ps">Live Now</div></div>
+      <div class="pc"><div class="pf">🌍</div><div class="pn">International</div><div class="pm">PayPal · Stripe</div><div class="ps">Live Now</div></div>
+    </div>
+  </section>
+
+  <!-- AUTH -->
+  <section id="auth">
+    <div class="ac fade">
+      <div style="text-align:center;margin-bottom:26px">
+        <div class="sl" style="justify-content:center">Join PlaySphere</div>
+        <h2 style="font-size:clamp(24px,4vw,36px)">Create Your Free Account</h2>
+        <p style="color:var(--muted);font-size:13px;margin-top:6px">
+          Real phone verification · Real earnings · EcoCash withdrawals
+        </p>
+      </div>
+      <div class="bonus">
+        <span style="font-size:20px">🎁</span>
+        <div>
+          <strong>Welcome Bonus — 50 Free Coins!</strong>
+          <span>Sign up now and get coins to start playing immediately</span>
+        </div>
+      </div>
+      <div class="atabs">
+        <button class="atab on" onclick="swTab('phone',this)">📱 Phone</button>
+        <button class="atab" onclick="swTab('email',this)">📧 Email</button>
+        <button class="atab" onclick="swTab('google',this)">🔍 Google</button>
+        <button class="atab" onclick="swTab('login',this)">🔑 Login</button>
+      </div>
+
+      <!-- PHONE -->
+      <div class="ap on" id="panel-phone">
+        <div id="ph-step1">
+          <div class="fl">
+            <label>YOUR NAME</label>
+            <input id="ph-name" class="fi" placeholder="e.g. Tafadzwa Moyo" type="text"/>
+          </div>
+          <div class="fl">
+            <label>PHONE NUMBER</label>
+            <input id="ph-number" class="fi" placeholder="+263771234567 or 0771234567" type="tel"/>
+          </div>
+          <div class="fl">
+            <label>COUNTRY</label>
+            <select id="ph-country" class="fi">
+              <option>Zimbabwe</option><option>Nigeria</option><option>Kenya</option>
+              <option>South Africa</option><option>Ghana</option><option>Uganda</option>
+              <option>Tanzania</option><option>India</option><option>USA</option>
+              <option>UK</option><option>Other</option>
+            </select>
+          </div>
+          <div id="ph-msg" class="am"></div>
+          <button id="ph-btn" class="ab" onclick="sendOTP()">Send OTP via SMS →</button>
+        </div>
+        <div id="ph-step2" style="display:none">
+          <div class="fl">
+            <label>ENTER OTP FROM SMS</label>
+            <input id="ph-otp" class="fi" placeholder="6-digit code" maxlength="6" type="number"
+              style="text-align:center;font-size:24px;font-weight:800;letter-spacing:10px"/>
+          </div>
+          <div id="ph-msg2" class="am"></div>
+          <button id="ph-vbtn" class="ab" onclick="verifyOTP()">Verify &amp; Enter App →</button>
+          <button onclick="document.getElementById('ph-step1').style.display='block';
+            document.getElementById('ph-step2').style.display='none';"
+            style="width:100%;background:none;border:none;color:var(--muted);
+            font-size:13px;cursor:pointer;margin-top:10px">← Back</button>
+        </div>
+      </div>
+
+      <!-- EMAIL -->
+      <div class="ap" id="panel-email">
+        <div class="fl"><label>YOUR NAME</label>
+          <input id="su-name" class="fi" placeholder="e.g. Tafadzwa Moyo" type="text"/></div>
+        <div class="fl"><label>EMAIL ADDRESS</label>
+          <input id="su-email" class="fi" placeholder="you@example.com" type="email"/></div>
+        <div class="fl"><label>PASSWORD (min 6 characters)</label>
+          <input id="su-pass" class="fi" placeholder="Choose a strong password" type="password"/></div>
+        <div class="fl"><label>COUNTRY</label>
+          <select id="su-country" class="fi">
             <option>Zimbabwe</option><option>Nigeria</option><option>Kenya</option>
             <option>South Africa</option><option>Ghana</option><option>Uganda</option>
             <option>Tanzania</option><option>India</option><option>USA</option>
             <option>UK</option><option>Other</option>
-          </select>
-        </div>
-        <div id="ph-msg" class="auth-msg"></div>
-        <button id="ph-btn" class="auth-btn" onclick="sendOTP()">Send OTP via SMS →</button>
-        <p style="color:var(--muted);font-size:12px;text-align:center;margin-top:10px">
-          A real SMS will be sent to your phone number
-        </p>
+          </select></div>
+        <div id="su-msg" class="am"></div>
+        <button id="su-btn" class="ab" onclick="signUpEmail()">Create Account →</button>
       </div>
-      <div id="ph-step2" style="display:none">
-        <div class="form-group">
-          <label class="form-label">ENTER OTP FROM SMS</label>
-          <input id="ph-otp" class="form-input" placeholder="6-digit code"
-            maxlength="6" type="number"
-            style="text-align:center;font-size:24px;font-weight:800;letter-spacing:10px"/>
-        </div>
-        <div id="ph-msg2" class="auth-msg"></div>
-        <button id="ph-verify-btn" class="auth-btn" onclick="verifyOTP()">Verify &amp; Enter App →</button>
-        <button onclick="document.getElementById('ph-step1').style.display='block';document.getElementById('ph-step2').style.display='none';"
-          style="width:100%;background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;margin-top:10px">
-          ← Back
-        </button>
-      </div>
-    </div>
 
-    <!-- EMAIL SIGNUP -->
-    <div class="auth-panel" id="panel-email">
-      <div class="form-group">
-        <label class="form-label">YOUR NAME</label>
-        <input id="su-name" class="form-input" placeholder="e.g. Tafadzwa Moyo" type="text"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">EMAIL ADDRESS</label>
-        <input id="su-email" class="form-input" placeholder="you@example.com" type="email"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">PASSWORD (min 6 characters)</label>
-        <input id="su-pass" class="form-input" placeholder="Choose a strong password" type="password"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">COUNTRY</label>
-        <select id="su-country" class="form-input">
-          <option>Zimbabwe</option><option>Nigeria</option><option>Kenya</option>
-          <option>South Africa</option><option>Ghana</option><option>Uganda</option>
-          <option>Tanzania</option><option>India</option><option>USA</option>
-          <option>UK</option><option>Other</option>
-        </select>
-      </div>
-      <div id="su-msg" class="auth-msg"></div>
-      <button id="su-btn" class="auth-btn" onclick="signUpEmail()">Create Account →</button>
-    </div>
-
-    <!-- GOOGLE SIGNIN -->
-    <div class="auth-panel" id="panel-google">
-      <div style="text-align:center;padding:20px 0">
-        <div style="font-size:48px;margin-bottom:16px">🔍</div>
-        <p style="color:var(--muted);font-size:14px;margin-bottom:20px;line-height:1.7">
-          Sign in instantly with your Google account.<br/>
-          No password needed — Firebase handles everything securely.
-        </p>
-        <div class="form-group">
-          <label class="form-label">YOUR COUNTRY</label>
-          <select id="g-country" class="form-input">
-            <option>Zimbabwe</option><option>Nigeria</option><option>Kenya</option>
-            <option>South Africa</option><option>Ghana</option><option>Uganda</option>
-            <option>Tanzania</option><option>India</option><option>USA</option>
-            <option>UK</option><option>Other</option>
-          </select>
+      <!-- GOOGLE -->
+      <div class="ap" id="panel-google">
+        <div style="text-align:center;padding:20px 0">
+          <div style="font-size:48px;margin-bottom:14px">🔍</div>
+          <p style="color:var(--muted);font-size:14px;margin-bottom:18px;line-height:1.7">
+            Sign in instantly with your Google account.<br/>Firebase handles authentication securely.
+          </p>
+          <div class="fl"><label>YOUR COUNTRY</label>
+            <select id="g-country" class="fi">
+              <option>Zimbabwe</option><option>Nigeria</option><option>Kenya</option>
+              <option>South Africa</option><option>Ghana</option><option>Uganda</option>
+              <option>Tanzania</option><option>India</option><option>USA</option>
+              <option>UK</option><option>Other</option>
+            </select></div>
+          <div id="g-msg" class="am" style="margin-bottom:12px"></div>
+          <button class="gb" onclick="signInGoogle()">
+            <svg width="20" height="20" viewBox="0 0 24 24">
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+            Continue with Google
+          </button>
         </div>
-        <div id="g-msg" class="auth-msg" style="margin-bottom:12px"></div>
-        <button class="google-btn" onclick="signInGoogle()">
-          <svg width="20" height="20" viewBox="0 0 24 24">
+      </div>
+
+      <!-- LOGIN -->
+      <div class="ap" id="panel-login">
+        <div class="fl"><label>EMAIL ADDRESS</label>
+          <input id="li-email" class="fi" placeholder="you@example.com" type="email"/></div>
+        <div class="fl"><label>PASSWORD</label>
+          <input id="li-pass" class="fi" placeholder="Your password" type="password"/></div>
+        <div id="li-msg" class="am"></div>
+        <button id="li-btn" class="ab" onclick="logInEmail()">Log In →</button>
+        <div class="div">or</div>
+        <button class="gb" onclick="signInGoogle()">
+          <svg width="18" height="18" viewBox="0 0 24 24">
             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
             <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
             <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
             <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
           </svg>
-          Continue with Google
+          Sign in with Google
         </button>
       </div>
     </div>
+  </section>
 
-    <!-- LOGIN -->
-    <div class="auth-panel" id="panel-login">
-      <div class="form-group">
-        <label class="form-label">EMAIL ADDRESS</label>
-        <input id="li-email" class="form-input" placeholder="you@example.com" type="email"/>
+  <!-- FAQ -->
+  <section style="background:var(--bg2)">
+    <div class="sl" style="justify-content:center;display:flex">FAQ</div>
+    <h2 style="text-align:center">Got Questions?</h2>
+    <div class="faq">
+      <div class="fq"><button class="fqb" onclick="faq(this)">
+        Is PlaySphere really free?<span class="fqi">+</span></button>
+        <div class="fqa">Yes, completely free. Sign up, get 50 coins, play and earn without ever paying anything.</div>
       </div>
-      <div class="form-group">
-        <label class="form-label">PASSWORD</label>
-        <input id="li-pass" class="form-input" placeholder="Your password" type="password"/>
+      <div class="fq"><button class="fqb" onclick="faq(this)">
+        How does EcoCash withdrawal work?<span class="fqi">+</span></button>
+        <div class="fqa">Withdrawals are powered by Paynow Zimbabwe. Your coins convert to USD at $0.002 per coin. Funds arrive to your EcoCash wallet within 5–30 minutes. Minimum is 100 coins ($0.20).</div>
       </div>
-      <div id="li-msg" class="auth-msg"></div>
-      <button id="li-btn" class="auth-btn" onclick="logInEmail()">Log In →</button>
-      <div class="divider">or</div>
-      <button class="google-btn" onclick="signInGoogle()">
-        <svg width="18" height="18" viewBox="0 0 24 24">
-          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-        </svg>
-        Sign in with Google
+      <div class="fq"><button class="fqb" onclick="faq(this)">
+        Is this a scam? Can I really earn real money?<span class="fqi">+</span></button>
+        <div class="fqa">Yes the earnings are real. PlaySphere earns from advertising and subscriptions. 40% of daily revenue goes to players as coin rewards. Amounts are modest — think supplemental income, not a full salary.</div>
+      </div>
+      <div class="fq"><button class="fqb" onclick="faq(this)">
+        How much can I realistically earn per month?<span class="fqi">+</span></button>
+        <div class="fqa">Casual players (5 games/day) earn $2–8/month. Active players with daily challenges earn $8–20/month. Players with 20+ referrals earn an extra $10–40/month from bonuses.</div>
+      </div>
+      <div class="fq"><button class="fqb" onclick="faq(this)">
+        What is VIP membership?<span class="fqi">+</span></button>
+        <div class="fqa">VIP is $2.99/month and gives 2× earning rate, no ads, and early tournament access. It is completely optional — free users earn real money too.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section id="cta">
+    <div class="ctab">
+      <h2>Ready to Start Earning?</h2>
+      <p>Join thousands of players across Africa who are turning their knowledge into real EcoCash money — starting today for free.</p>
+      <button class="btn-p" style="font-size:17px;padding:17px 44px"
+        onclick="document.getElementById('auth').scrollIntoView({behavior:'smooth'})">
+        🎮 Play Now — It's Free
       </button>
+      <p style="margin-top:20px;font-size:12px;color:var(--muted)">
+        No credit card · Free to join · EcoCash withdrawals in 5–30 min
+      </p>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- APP SCREEN (shown after login) -->
-<div id="app-screen">
-  <div class="app-header">
-    <div>
-      <div class="app-welcome">Welcome back 👋</div>
-      <div class="app-username" id="app-name">Player</div>
-      <div style="color:var(--muted);font-size:12px;margin-top:2px" id="app-country">Zimbabwe</div>
-    </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px">
-      <div class="app-coins-badge">
-        <span style="font-size:18px">🪙</span>
-        <span id="app-coins">50</span>
+  <!-- FOOTER -->
+  <footer>
+    <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:32px">
+      <div style="max-width:260px">
+        <div class="logo" style="margin-bottom:12px">
+          <div class="logo-icon">🌐</div>
+          <span class="logo-name">PlaySphere</span>
+        </div>
+        <p style="color:var(--muted);font-size:14px;line-height:1.8;margin-top:8px">
+          Play skill-based games and earn real money via EcoCash, M-Pesa and PayPal.
+          Powered by Paynow Zimbabwe. Built for Africa.
+        </p>
       </div>
-      <button class="signout-btn" onclick="doSignOut()">Sign Out</button>
+      <div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;margin-bottom:12px">Games</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <a href="#" style="color:var(--muted);font-size:14px">Trivia Blitz</a>
+          <a href="#" style="color:var(--muted);font-size:14px">Math Blitz</a>
+          <a href="#" style="color:var(--muted);font-size:14px">Word Scramble</a>
+          <a href="#" style="color:var(--muted);font-size:14px">Memory Match</a>
+        </div>
+      </div>
+      <div>
+        <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;margin-bottom:12px">Legal</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <a href="#" style="color:var(--muted);font-size:14px">Terms of Service</a>
+          <a href="#" style="color:var(--muted);font-size:14px">Privacy Policy</a>
+          <a href="#" style="color:var(--muted);font-size:14px">Fair Play Policy</a>
+        </div>
+      </div>
+    </div>
+    <div class="fb">
+      <p>© 2026 PlaySphere. All rights reserved. Powered by Paynow Zimbabwe.</p>
+      <p>🇿🇼 Zimbabwe · 🇳🇬 Nigeria · 🇰🇪 Kenya · 🌍 +12 more</p>
+    </div>
+  </footer>
+
+</div><!-- end main-content -->
+
+<!-- APP SCREEN (after login) -->
+<div id="app-screen">
+  <div class="ah">
+    <div>
+      <div class="aw">Welcome back 👋</div>
+      <div class="au" id="app-name">Player</div>
+      <div style="color:var(--muted);font-size:11px;margin-top:2px" id="app-country">Zimbabwe</div>
+    </div>
+    <div class="ac2">
+      <div class="cb"><span style="font-size:18px">🪙</span><span id="app-coins">50</span></div>
+      <button class="so" onclick="doSignOut()">Sign Out</button>
     </div>
   </div>
 
-  <div class="app-stats">
-    <div class="app-stat">
-      <div class="app-stat-val" id="app-games">0</div>
-      <div class="app-stat-label">Games Played</div>
-    </div>
-    <div class="app-stat">
-      <div class="app-stat-val" id="app-usd">$0.10</div>
-      <div class="app-stat-label">USD Value</div>
-    </div>
-    <div class="app-stat">
-      <div class="app-stat-val">🌍</div>
-      <div class="app-stat-label">Global Player</div>
-    </div>
+  <div class="as">
+    <div class="as-i"><div class="as-v" id="app-games">0</div><div class="as-l">Games</div></div>
+    <div class="as-i"><div class="as-v" id="app-usd">$0.10</div><div class="as-l">USD Value</div></div>
+    <div class="as-i"><div class="as-v">🌍</div><div class="as-l">Global</div></div>
   </div>
 
   <!-- Daily Challenge -->
@@ -791,137 +947,87 @@ footer{background:var(--bg2);border-top:1px solid var(--border);
       ⚡ DAILY CHALLENGE
     </div>
     <div style="color:#fff;font-size:20px;font-weight:900;margin:5px 0">Global Trivia Blitz</div>
-    <div style="color:rgba(255,255,255,0.7);font-size:13px">60 hard questions · Earn up to 300 coins</div>
+    <div style="color:rgba(255,255,255,0.7);font-size:12px">Hard questions · Earn up to 300 coins</div>
     <div style="background:rgba(255,255,255,0.15);border-radius:9px;
-      padding:8px 16px;display:inline-block;margin-top:12px">
-      <span style="color:#fff;font-weight:800;font-size:13px">TAP TO PLAY →</span>
+      padding:7px 14px;display:inline-block;margin-top:12px">
+      <span style="color:#fff;font-weight:800;font-size:12px">PLAY NOW →</span>
     </div>
   </div>
 
   <!-- Games -->
-  <div class="app-card">
-    <div class="app-card-title">🎮 All Games</div>
-    <div class="app-games-grid">
-      <div class="app-game">
-        <div class="app-game-icon">🧠</div>
-        <div class="app-game-name">Trivia Blitz</div>
-        <div class="app-game-reward" style="color:#6366f1">🪙 15–60</div>
-      </div>
-      <div class="app-game">
-        <div class="app-game-icon">🔢</div>
-        <div class="app-game-name">Math Blitz</div>
-        <div class="app-game-reward" style="color:#10b981">🪙 20–80</div>
-      </div>
-      <div class="app-game">
-        <div class="app-game-icon">🔤</div>
-        <div class="app-game-name">Word Scramble</div>
-        <div class="app-game-reward" style="color:#f59e0b">🪙 10–50</div>
-      </div>
-      <div class="app-game">
-        <div class="app-game-icon">🃏</div>
-        <div class="app-game-name">Memory Match</div>
-        <div class="app-game-reward" style="color:#f43f5e">🪙 25–100</div>
-      </div>
+  <div class="acard">
+    <div class="acard-t">🎮 All Games</div>
+    <div class="agrid">
+      <div class="agame"><div class="agame-i">🧠</div>
+        <div class="agame-n">Trivia Blitz</div>
+        <div class="agame-r" style="color:#6366f1">🪙 15–60</div></div>
+      <div class="agame"><div class="agame-i">🔢</div>
+        <div class="agame-n">Math Blitz</div>
+        <div class="agame-r" style="color:#10b981">🪙 20–80</div></div>
+      <div class="agame"><div class="agame-i">🔤</div>
+        <div class="agame-n">Word Scramble</div>
+        <div class="agame-r" style="color:#f59e0b">🪙 10–50</div></div>
+      <div class="agame"><div class="agame-i">🃏</div>
+        <div class="agame-n">Memory Match</div>
+        <div class="agame-r" style="color:#f43f5e">🪙 25–100</div></div>
     </div>
   </div>
 
-  <!-- Referral -->
-  <div class="ref-box">
+  <!-- WALLET WITH PAYNOW -->
+  <div class="acard">
+    <div class="acard-t">💸 Withdraw via EcoCash</div>
+    <div class="wbal">
+      <div class="wbal-l">TOTAL BALANCE</div>
+      <div class="wbal-v"><span>🪙</span><span id="wallet-coins">50</span></div>
+      <div class="wbal-u">≈ $<span id="wallet-usd">0.10</span> USD</div>
+      <div style="background:rgba(255,255,255,0.15);border-radius:8px;
+        padding:5px 12px;display:inline-block;margin-top:10px">
+        <span style="color:#fff;font-size:11px;font-weight:700">
+          Powered by Paynow Zimbabwe 🇿🇼
+        </span>
+      </div>
+    </div>
+    <input id="withdraw-coins" class="wi" type="number"
+      placeholder="Coins to withdraw (min 100 = $0.20)"/>
+    <input id="withdraw-phone" class="wi" type="tel"
+      placeholder="EcoCash number e.g. 0771234567"/>
+    <button class="wb" onclick="initiateWithdrawal()">
+      Withdraw via EcoCash →
+    </button>
+    <div id="withdraw-msg" class="wm"></div>
+    <div style="color:rgba(255,255,255,0.4);font-size:11px;text-align:center;margin-top:10px">
+      Min 100 coins · $0.002 per coin · 5–30 min processing
+    </div>
+  </div>
+
+  <!-- REFERRAL -->
+  <div class="rb">
     <div style="color:#8b5cf6;font-family:'Syne',sans-serif;font-weight:800;font-size:15px;margin-bottom:6px">
       👥 Your Referral Code
     </div>
     <div style="color:#94a3b8;font-size:13px;margin-bottom:10px">
-      Share this code and earn 150 coins for every friend who joins!
+      Share this code — earn 150 coins for every friend who joins!
     </div>
-    <div class="ref-code" id="app-code">PS-LOADING</div>
-    <button class="ref-copy-btn" onclick="
-      navigator.clipboard.writeText(document.getElementById('app-code').textContent);
-      this.textContent='✓ Copied!';
-      setTimeout(()=>this.textContent='Copy Referral Code',2000)">
-      Copy Referral Code
-    </button>
-  </div>
-
-  <!-- Wallet preview -->
-  <div class="app-card">
-    <div class="app-card-title">👛 Wallet</div>
-    <div style="background:linear-gradient(135deg,rgba(249,115,22,0.15),rgba(249,115,22,0.05));
-      border:1px solid rgba(249,115,22,0.2);border-radius:14px;padding:18px;text-align:center">
-      <div style="color:rgba(249,115,22,0.7);font-size:11px;font-weight:700;margin-bottom:6px">
-        TOTAL BALANCE
-      </div>
-      <div style="color:#f97316;font-family:'Syne',sans-serif;font-size:36px;font-weight:800">
-        🪙 <span id="wallet-coins">50</span>
-      </div>
-      <div style="color:#94a3b8;font-size:14px;margin-top:4px">
-        ≈ $<span id="wallet-usd">0.10</span> USD
-      </div>
-    </div>
-    <div style="color:#475569;font-size:12px;text-align:center;margin-top:12px">
-      Minimum withdrawal: 100 coins ($0.20) via EcoCash, M-Pesa or PayPal
-    </div>
+    <div class="rc" id="app-code">PS-LOADING</div>
+    <button id="copy-btn" class="rcb" onclick="copyCode()">Copy Referral Code</button>
   </div>
 </div>
 
-<!-- FOOTER -->
-<footer>
-  <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:32px;margin-bottom:8px">
-    <div style="max-width:280px">
-      <a href="#" class="logo" style="margin-bottom:12px;display:inline-flex">
-        <div class="logo-icon">🌐</div>
-        <span class="logo-text">PlaySphere</span>
-      </a>
-      <p style="color:var(--muted);font-size:14px;line-height:1.8;margin-top:10px">
-        Play skill-based games and earn real money — withdrawn via EcoCash, M-Pesa, PayPal and more. Built for Africa and the world.
-      </p>
-    </div>
-    <div>
-      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;margin-bottom:14px">Games</div>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <a href="#" style="color:var(--muted);text-decoration:none;font-size:14px">Trivia Blitz</a>
-        <a href="#" style="color:var(--muted);text-decoration:none;font-size:14px">Math Blitz</a>
-        <a href="#" style="color:var(--muted);text-decoration:none;font-size:14px">Word Scramble</a>
-        <a href="#" style="color:var(--muted);text-decoration:none;font-size:14px">Memory Match</a>
-      </div>
-    </div>
-    <div>
-      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:14px;margin-bottom:14px">Legal</div>
-      <div style="display:flex;flex-direction:column;gap:8px">
-        <a href="#" style="color:var(--muted);text-decoration:none;font-size:14px">Terms of Service</a>
-        <a href="#" style="color:var(--muted);text-decoration:none;font-size:14px">Privacy Policy</a>
-        <a href="#" style="color:var(--muted);text-decoration:none;font-size:14px">Fair Play Policy</a>
-      </div>
-    </div>
-  </div>
-  <div class="footer-bottom">
-    <p>© 2025 PlaySphere. All rights reserved.</p>
-    <p>🇿🇼 Zimbabwe · 🇳🇬 Nigeria · 🇰🇪 Kenya · 🌍 +12 more</p>
-  </div>
-</footer>
-
 <script>
-// Auth tab switching
-function switchAuthTab(tab, btn) {
-  document.querySelectorAll('.auth-tab').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.auth-panel').forEach(p => p.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('panel-' + tab).classList.add('active');
+function swTab(id,btn){
+  document.querySelectorAll('.atab').forEach(b=>b.classList.remove('on'));
+  document.querySelectorAll('.ap').forEach(p=>p.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById('panel-'+id).classList.add('on');
 }
-
-// Keep wallet display in sync
-setInterval(() => {
-  const coins = document.getElementById('app-coins');
-  const wCoins = document.getElementById('wallet-coins');
-  const wUsd = document.getElementById('wallet-usd');
-  const usdEl = document.getElementById('app-usd');
-  if (coins && wCoins) {
-    wCoins.textContent = coins.textContent;
-    const c = parseInt(coins.textContent.replace(/,/g,'')) || 50;
-    const u = (c * 0.002).toFixed(2);
-    if (wUsd) wUsd.textContent = u;
-    if (usdEl) usdEl.textContent = '$' + u;
-  }
-}, 1000);
+function faq(btn){
+  const a=btn.nextElementSibling;
+  const ic=btn.querySelector('.fqi');
+  const open=a.classList.contains('open');
+  document.querySelectorAll('.fqa').forEach(x=>x.classList.remove('open'));
+  document.querySelectorAll('.fqi').forEach(x=>x.classList.remove('open'));
+  if(!open){a.classList.add('open');ic.classList.add('open');}
+}
 </script>
 </body>
 </html>
